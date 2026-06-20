@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NESO-DT — Automotive JIT Digital Twin</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; }
+  .header { background: #1a1d2e; padding: 16px 24px; border-bottom: 1px solid #2d2f45; display: flex; align-items: center; gap: 12px; }
+  .header h1 { font-size: 20px; color: #00d4ff; }
+  .header span { font-size: 13px; color: #888; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 20px; }
+  .card { background: #1a1d2e; border-radius: 8px; padding: 16px; border: 1px solid #2d2f45; }
+  .card h3 { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 8px; }
+  .card .value { font-size: 28px; font-weight: bold; color: #00d4ff; }
+  .card .sub { font-size: 12px; color: #666; margin-top: 4px; }
+  .section { padding: 0 20px 20px; }
+  .section h2 { font-size: 16px; color: #ccc; margin-bottom: 12px; border-bottom: 1px solid #2d2f45; padding-bottom: 8px; }
+  .line-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .line-card { background: #1a1d2e; border-radius: 8px; padding: 16px; border: 1px solid #2d2f45; }
+  .line-card h3 { color: #00d4ff; margin-bottom: 8px; }
+  .progress-bar { height: 8px; background: #2d2f45; border-radius: 4px; overflow: hidden; margin: 6px 0; }
+  .progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+  .badge-critical { background: #ff4444; color: white; }
+  .badge-warning { background: #ff9900; color: black; }
+  .badge-ok { background: #00cc66; color: black; }
+  .badge-high { background: #ff6600; color: white; }
+  .badge-medium { background: #ffcc00; color: black; }
+  .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .table th { text-align: left; padding: 8px 12px; background: #12141f; color: #888; font-weight: normal; }
+  .table td { padding: 8px 12px; border-top: 1px solid #2d2f45; }
+  .table tr:hover td { background: #1f2235; }
+  .eqa-box { background: #1a1d2e; border-radius: 8px; padding: 16px; border: 1px solid #2d2f45; }
+  .eqa-input { display: flex; gap: 8px; margin-bottom: 12px; }
+  .eqa-input input { flex: 1; background: #12141f; border: 1px solid #2d2f45; color: #e0e0e0; padding: 8px 12px; border-radius: 6px; font-size: 14px; }
+  .eqa-input button { background: #00d4ff; color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+  .eqa-answer { background: #12141f; border-radius: 6px; padding: 12px; white-space: pre-wrap; font-family: monospace; font-size: 13px; color: #00ff88; min-height: 60px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tab { padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; background: #12141f; color: #888; border: 1px solid #2d2f45; }
+  .tab.active { background: #00d4ff; color: #000; font-weight: bold; border-color: #00d4ff; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot-green { background: #00cc66; }
+  .dot-red { background: #ff4444; }
+  .dot-yellow { background: #ff9900; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const API = "";
+
+function useFetch(url, interval = 10000) {
+  const [data, setData] = React.useState(null);
+  React.useEffect(() => {
+    const load = () => fetch(API + url).then(r => r.json()).then(setData).catch(console.error);
+    load();
+    const id = setInterval(load, interval);
+    return () => clearInterval(id);
+  }, [url]);
+  return data;
+}
+
+function StatCard({ title, value, sub, color }) {
+  return (
+    <div className="card">
+      <h3>{title}</h3>
+      <div className="value" style={{ color: color || '#00d4ff' }}>{value ?? '...'}</div>
+      {sub && <div className="sub">{sub}</div>}
+    </div>
+  );
+}
+
+function BufferBar({ pct }) {
+  const color = pct < 15 ? '#ff4444' : pct < 30 ? '#ff9900' : '#00cc66';
+  return (
+    <div className="progress-bar">
+      <div className="progress-fill" style={{ width: `${pct}%`, background: color }} />
+    </div>
+  );
+}
+
+function LineCard({ line }) {
+  const bufferStatus = line.buffer_pct < 15 ? 'critical' : line.buffer_pct < 30 ? 'warning' : 'ok';
+  const staffStatus = line.available_workers < line.shift_requirement ? 'critical' : 'ok';
+  return (
+    <div className="line-card">
+      <h3>{line.line_id} — {line.name}</h3>
+      <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{line.part_type}</div>
+      <div style={{ fontSize: 13 }}>Buffer: {line.buffer_pct?.toFixed(1)}%</div>
+      <BufferBar pct={line.buffer_pct || 0} />
+      <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+        <span className={`badge badge-${bufferStatus}`}>
+          {line.buffer_units}/{line.safety_stock} units
+        </span>
+        <span className={`badge badge-${staffStatus}`}>
+          👷 {line.available_workers}/{line.shift_requirement} staff
+        </span>
+        <span className="badge badge-warning">
+          ⚠️ {line.at_risk_orders} at-risk orders
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function EQAPanel() {
+  const [question, setQuestion] = React.useState('');
+  const [answer, setAnswer] = React.useState('Ask me anything about the Digital Twin...');
+  const [loading, setLoading] = React.useState(false);
+
+  const ask = async () => {
+    if (!question.trim()) return;
+    setLoading(true);
+    try {
+      const res = await fetch(API + '/api/eqa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question })
+      });
+      const data = await res.json();
+      setAnswer(data.answer);
+    } catch (e) {
+      setAnswer('Error connecting to EQA engine.');
+    }
+    setLoading(false);
+  };
+
+  const examples = [
+    'why is LINE_A at risk',
+    'which machines are critical',
+    'show compliance status',
+    'what is the buffer status',
+    'show audit trail',
+    'what is the total cost'
+  ];
+
+  return (
+    <div className="eqa-box">
+      <div className="eqa-input">
+        <input
+          value={question}
+          onChange={e => setQuestion(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && ask()}
+          placeholder="Ask about your Digital Twin..."
+        />
+        <button onClick={ask} disabled={loading}>
+          {loading ? '...' : 'Ask'}
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+        {examples.map(ex => (
+          <span
+            key={ex}
+            onClick={() => { setQuestion(ex); }}
+            style={{ fontSize: 11, color: '#00d4ff', cursor: 'pointer', padding: '2px 6px', background: '#12141f', borderRadius: 4 }}
+          >
+            {ex}
+          </span>
+        ))}
+      </div>
+      <div className="eqa-answer">{answer}</div>
+    </div>
+  );
+}
+
+function App() {
+  const summary = useFetch('/api/summary', 15000);
+  const lines = useFetch('/api/lines', 15000);
+  const deliveries = useFetch('/api/deliveries?limit=10', 15000);
+  const machines = useFetch('/api/machines?limit=10', 15000);
+  const audit = useFetch('/api/audit?limit=10', 15000);
+  const compliance = useFetch('/api/compliance', 15000);
+  const sopRules = useFetch('/api/sop-rules', 60000);
+  const [tab, setTab] = React.useState('overview');
+
+  return (
+    <div>
+      <div className="header">
+        <div>
+          <h1>🏭 NESO-DT Digital Twin</h1>
+          <span>Neuro-Symbolic Automotive JIT Manufacturing Intelligence</span>
+        </div>
+        <div style={{ marginLeft: 'auto', fontSize: 12, color: '#00cc66' }}>
+          <span className="status-dot dot-green" />
+          LIVE
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid">
+        <StatCard title="Total Graph Nodes" value={summary?.total_nodes?.toLocaleString()} sub="Knowledge Graph" />
+        <StatCard title="At-Risk Deliveries" value={summary?.at_risk_deliveries?.toLocaleString()} color="#ff9900" sub="Late delivery risk = 1" />
+        <StatCard title="SOP Violations" value={summary?.sop_violations?.toLocaleString()} color="#ff4444" sub="Machine constraint breaches" />
+        <StatCard title="Active Suppliers" value={summary?.suppliers} color="#00cc66" sub="Primary + backup" />
+      </div>
+
+      {/* Tabs */}
+      <div className="section">
+        <div className="tabs">
+          {['overview', 'deliveries', 'machines', 'compliance', 'sop-rules', 'eqa'].map(t => (
+            <div key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
+              {t.toUpperCase().replace('-', ' ')}
+            </div>
+          ))}
+        </div>
+
+        {tab === 'overview' && (
+          <>
+            <h2>Production Line Status</h2>
+            <div className="line-grid">
+              {(lines || []).map(l => <LineCard key={l.line_id} line={l} />)}
+            </div>
+          </>
+        )}
+
+        {tab === 'deliveries' && (
+          <>
+            <h2>At-Risk Delivery Orders</h2>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Order ID</th>
+                  <th>Part Type</th>
+                  <th>Line</th>
+                  <th>Delay Days</th>
+                  <th>Risk Level</th>
+                  <th>Region</th>
+                  <th>Shipping</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(deliveries || []).map(d => (
+                  <tr key={d.order_id}>
+                    <td>{d.order_id}</td>
+                    <td>{d.part_type}</td>
+                    <td>{d.line_id}</td>
+                    <td style={{ color: d.delay_days > 2 ? '#ff4444' : '#ff9900' }}>
+                      {d.delay_days?.toFixed(1)}d
+                    </td>
+                    <td>
+                      <span className={`badge badge-${d.risk_level?.includes('CRITICAL') ? 'critical' : 'warning'}`}>
+                        {d.risk_level}
+                      </span>
+                    </td>
+                    <td>{d.region}</td>
+                    <td>{d.shipping_mode}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {tab === 'machines' && (
+          <>
+            <h2>Machine SOP Violations</h2>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>UID</th>
+                  <th>Line</th>
+                  <th>SOP Violated</th>
+                  <th>Wear</th>
+                  <th>Thermal</th>
+                  <th>Action</th>
+                  <th>Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(machines || []).map(m => (
+                  <tr key={m.uid}>
+                    <td>{m.uid}</td>
+                    <td>{m.line_id}</td>
+                    <td>
+                      <span className={`badge badge-${m.sop === 'SOP_THERMAL' ? 'critical' : 'high'}`}>
+                        {m.sop}
+                      </span>
+                    </td>
+                    <td style={{ color: m.wear_criticality > 0.81 ? '#ff4444' : '#e0e0e0' }}>
+                      {(m.wear_criticality * 100)?.toFixed(1)}%
+                    </td>
+                    <td>{m.thermal_stress?.toFixed(2)}</td>
+                    <td style={{ fontSize: 11 }}>{m.action}</td>
+                    <td>€{m.cost?.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {tab === 'compliance' && (
+          <>
+            <h2>Compliance & Audit Trail</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16 }}>
+              <div className="card">
+                <h3>Status Distribution</h3>
+                {(compliance || []).map(c => (
+                  <div key={c.status} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #2d2f45', fontSize: 13 }}>
+                    <span>{c.status}</span>
+                    <span style={{ color: '#00d4ff' }}>{c.count}</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Agent</th>
+                      <th>Decision</th>
+                      <th>Rule</th>
+                      <th>Status</th>
+                      <th>Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(audit || []).map((a, i) => (
+                      <tr key={i}>
+                        <td style={{ color: '#00d4ff', fontSize: 11 }}>{a.agent}</td>
+                        <td style={{ fontSize: 11 }}>{a.decision?.substring(0, 40)}</td>
+                        <td style={{ fontSize: 11, color: '#888' }}>{a.rule}</td>
+                        <td>
+                          <span className={`badge badge-${a.status?.includes('VETO') || a.status?.includes('BREACH') ? 'critical' : a.status === 'COMPLIANT' ? 'ok' : 'warning'}`}>
+                            {a.status}
+                          </span>
+                        </td>
+                        <td>€{a.cost?.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {tab === 'sop-rules' && (
+          <>
+            <h2>SOP Rules — Live from Knowledge Graph</h2>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Name</th>
+                  <th>Condition</th>
+                  <th>Threshold</th>
+                  <th>Severity</th>
+                  <th>Action</th>
+                  <th>Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(sopRules || []).map(r => (
+                  <tr key={r.code}>
+                    <td style={{ color: '#00d4ff', fontWeight: 'bold' }}>{r.code}</td>
+                    <td>{r.name}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.field} &gt; {r.threshold}</td>
+                    <td>{r.threshold}</td>
+                    <td>
+                      <span className={`badge badge-${r.severity === 'CRITICAL' ? 'critical' : r.severity === 'HIGH' ? 'high' : 'medium'}`}>
+                        {r.severity}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 11 }}>{r.action}</td>
+                    <td>€{r.cost?.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {tab === 'eqa' && (
+          <>
+            <h2>Embodied Question Answering — Ask the Digital Twin</h2>
+            <EQAPanel />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
