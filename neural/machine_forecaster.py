@@ -1,5 +1,7 @@
 import sys
 import os
+
+from sklearn.ensemble import IsolationForest
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import pandas as pd
@@ -8,6 +10,7 @@ import xgboost as xgb
 import joblib
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.ensemble import IsolationForest
 
 
 class MachineForecaster:
@@ -51,6 +54,7 @@ class MachineForecaster:
         self.model = None
         self.cal_scores = None
         self.q_hat = None
+        self.ood_detector = None
 
     def preprocess(self, df):
         df = df.copy()
@@ -127,6 +131,29 @@ class MachineForecaster:
             n_jobs=-1
         )
         self.model.fit(X_train, y_train)
+
+        # ── Isolation Forest OOD Detector ────────────────────────
+        # Machine failure rate is 3.4% — we use the healthy
+        # class proportion as contamination estimate.
+        # This means the detector treats ~3.4% of training
+        # data as potential anomalies — matching reality.
+        contamination_estimate = float(
+            min(max(y_train.mean(), 0.01), 0.5)
+        )
+        print(f"  -> OOD contamination estimate: "
+              f"{contamination_estimate:.3f}")
+
+        self.ood_detector = IsolationForest(
+            n_estimators=100,
+            contamination=contamination_estimate,
+            random_state=42,
+            n_jobs=-1
+        )
+        self.ood_detector.fit(X_train)
+        print("[MACHINE FORECASTER] "
+              "Isolation Forest OOD detector fitted.")
+
+        # Evaluate on test set
 
         # Evaluate on test set
         y_pred = self.model.predict(X_test)
@@ -206,15 +233,57 @@ class MachineForecaster:
         else:
             confidence = "ABSTAIN"
 
-        # Risk level for agent decision making
+# Risk level for agent decision making
+        # Default defined first to prevent UnboundLocalError
+        # if OOD detection modifies it before assignment
+        risk_level = "LOW"
         if prob_fail >= 0.80:
             risk_level = "CRITICAL"
         elif prob_fail >= 0.50:
             risk_level = "HIGH"
         elif prob_fail >= 0.25:
             risk_level = "MEDIUM"
-        else:
-            risk_level = "LOW"
+
+            # ── OOD Detection ─────────────────────────────────────────
+            # Machine safety consequences are higher than delivery —
+            # a false HIGH confidence on an OOD machine reading
+            # could allow a dangerous machine to keep running.
+            # Isolation Forest: -1 = anomaly (OOD), 1 = normal
+            is_ood = False
+            ood_score = None
+
+            if self.ood_detector is not None:
+                raw_score = float(
+                    self.ood_detector.score_samples(df)[0]
+                )
+                ood_label = int(
+                    self.ood_detector.predict(df)[0]
+                )
+                is_ood = ood_label == -1
+                ood_score = round(raw_score, 4)
+
+                if is_ood:
+                    confidence = "OOD_SUSPENSION"
+                    # For machine safety: OOD + any failure signal
+                    # defaults to CRITICAL rather than trusting model
+                    if prob_fail > 0.1:
+                        risk_level = "CRITICAL"
+                    print(f"[MACHINE FORECASTER] ⚠️  OOD detected — "
+                        f"coverage guarantee suspended | "
+                        f"risk_level forced to {risk_level} "
+                        f"(score={ood_score})")
+
+            return {
+                "failure_probability": round(prob_fail, 4),
+                "prediction_set": prediction_set,
+                "confidence": confidence,
+                "risk_level": risk_level,
+                "q_hat": round(self.q_hat, 4),
+                "will_fail": prob_fail > 0.5,
+                "is_ood": is_ood,
+                "ood_score": ood_score,
+                "coverage_guarantee_valid": not is_ood
+            }
 
         return {
             "failure_probability": round(prob_fail, 4),
@@ -241,7 +310,6 @@ class MachineForecaster:
         self.q_hat = data["q_hat"]
         self.alpha = data["alpha"]
         print(f"[MACHINE FORECASTER] Loaded from {path}")
-
 
 if __name__ == "__main__":
     forecaster = MachineForecaster(alpha=0.05)

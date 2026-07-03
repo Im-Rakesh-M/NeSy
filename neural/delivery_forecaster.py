@@ -9,6 +9,7 @@ import joblib
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.ensemble import IsolationForest
 
 
 class DeliveryForecaster:
@@ -51,6 +52,7 @@ class DeliveryForecaster:
         self.label_encoders = {}
         self.cal_scores = None
         self.q_hat = None
+        self.ood_detector = None
 
     def preprocess(self, df):
         """
@@ -123,6 +125,34 @@ class DeliveryForecaster:
             n_jobs=-1
         )
         self.model.fit(X_train, y_train)
+
+        # self.model.fit(X_train, y_train)
+
+        # ── Isolation Forest OOD Detector ────────────────────────
+        # Rationale: Learns multivariate geometry of training
+        # distribution. Anomalous inputs are isolated faster
+        # because they occupy sparse regions of feature space.
+        # contamination estimated from actual class imbalance
+        # rather than set arbitrarily.
+        # Reference: Liu et al. (2008) "Isolation Forest" ICDM.
+        # Contamination = proportion of genuine anomalies
+        # For delivery data we use 5% — representing extreme
+        # outlier orders far outside normal operations.
+        # Class imbalance (54% late) is NOT anomaly rate —
+        # late deliveries are the norm, not the exception.
+        contamination_estimate = 0.05
+        print(f"  -> OOD contamination estimate: "
+              f"{contamination_estimate:.3f}")
+
+        self.ood_detector = IsolationForest(
+            n_estimators=100,
+            contamination=contamination_estimate,
+            random_state=42,
+            n_jobs=-1
+        )
+        self.ood_detector.fit(X_train)
+        print("[DELIVERY FORECASTER] "
+              "Isolation Forest OOD detector fitted.")
 
         # Evaluate on test set
         y_pred = self.model.predict(X_test)
@@ -211,12 +241,36 @@ class DeliveryForecaster:
         else:
             confidence = "ABSTAIN"
 
+        # ── OOD Detection ─────────────────────────────────────────
+        # Isolation Forest: -1 = anomaly (OOD), 1 = normal
+        is_ood = False
+        ood_score = None
+
+        if self.ood_detector is not None:
+            raw_score = float(
+                self.ood_detector.score_samples(df)[0]
+            )
+            ood_label = int(
+                self.ood_detector.predict(df)[0]
+            )
+            is_ood = ood_label == -1
+            ood_score = round(raw_score, 4)
+
+            if is_ood:
+                confidence = "OOD_SUSPENSION"
+                print(f"[DELIVERY FORECASTER] ⚠️  OOD detected — "
+                      f"coverage guarantee suspended "
+                      f"(score={ood_score})")
+
         return {
             "late_probability": round(prob_late, 4),
             "prediction_set": prediction_set,
             "confidence": confidence,
             "q_hat": round(self.q_hat, 4),
-            "will_be_late": prob_late > 0.5
+            "will_be_late": prob_late > 0.5,
+            "is_ood": is_ood,
+            "ood_score": ood_score,
+            "coverage_guarantee_valid": not is_ood
         }
 
     def save(self, path="data/delivery_forecaster.pkl"):
@@ -225,7 +279,8 @@ class DeliveryForecaster:
             "label_encoders": self.label_encoders,
             "cal_scores": self.cal_scores,
             "q_hat": self.q_hat,
-            "alpha": self.alpha
+            "alpha": self.alpha,
+            "ood_detector": self.ood_detector
         }, path)
         print(f"[DELIVERY FORECASTER] Saved to {path}")
 
@@ -236,6 +291,7 @@ class DeliveryForecaster:
         self.cal_scores = data["cal_scores"]
         self.q_hat = data["q_hat"]
         self.alpha = data["alpha"]
+        self.ood_detector = data.get("ood_detector")
         print(f"[DELIVERY FORECASTER] Loaded from {path}")
 
 

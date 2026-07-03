@@ -12,8 +12,10 @@ from agents.inventory_agent import InventoryAgent
 from agents.hr_agent import HRAgent
 from agents.regulatory_agent import RegulatoryAgent
 from agents.sop_agent import SOPAgent
+from agents.bom_agent import BOMAgent
 from neural.delivery_forecaster import DeliveryForecaster
 from neural.machine_forecaster import MachineForecaster
+from agents.bom_agent import BOMAgent
 
 
 class NESODigitalTwin:
@@ -64,7 +66,7 @@ class NESODigitalTwin:
         self.hr = HRAgent(self.bus)
         self.regulatory = RegulatoryAgent(self.bus)
         self.sop = SOPAgent(self.bus)
-
+        self.bom = BOMAgent(self.bus)
         print("[NESO-DT] All agents online.")
         print(f"[NESO-DT] Message bus topics: "
               f"{self.bus.get_topic_stats()}")
@@ -283,6 +285,34 @@ class NESODigitalTwin:
                     print(f"    {b['value']}")
                 print()
 
+ # BOM completion risk summary
+        with self.conn.session() as session:
+            bom_risks = session.run("""
+                MATCH (v:Vehicle)-[r:AT_RISK]->(b:BOMItem)
+                      -[:FULFILLED_BY]->(l:ProductionLine)
+                RETURN v.model_id AS model,
+                       v.daily_target AS daily_target,
+                       b.part_type AS blocked_part,
+                       l.line_id AS line_id,
+                       r.severity AS severity,
+                       r.wip_cost_eur AS wip_cost
+                ORDER BY r.severity DESC
+            """)
+            bom_records = list(bom_risks)
+
+        if bom_records:
+            total_blocked = sum(r["daily_target"] for r in bom_records)
+            total_wip = sum(r["wip_cost"] or 0 for r in bom_records)
+            print(f"\n  BOM Completion Risk:")
+            print(f"  {'-'*40}")
+            for r in bom_records:
+                print(f"  {r['model']} | {r['blocked_part']} "
+                      f"| {r['severity']} | "
+                      f"WIP: €{r['wip_cost']:,}")
+            print(f"\n  Total vehicles at risk : {total_blocked}")
+            print(f"  Total WIP cost         : €{total_wip:,}")
+        else:
+            print(f"\n  BOM Completion Risk: No vehicles at risk")
 
 async def main():
     twin = NESODigitalTwin()

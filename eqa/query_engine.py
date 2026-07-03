@@ -74,6 +74,9 @@ class EQAEngine:
 
         elif "shift" in q or "worker" in q:
             return self._shift_coverage()
+        
+        elif "vehicle" in q or "bom" in q or "completion" in q:
+            return self._vehicle_completion_risk()
 
         else:
             return self._general_summary()
@@ -424,6 +427,69 @@ class EQAEngine:
             if token.isdigit():
                 return int(token)
         return 0
+    
+    def _vehicle_completion_risk(self) -> str:
+            """Shows vehicle completion risk from BOM analysis."""
+            results = self.conn.session().run("""
+                MATCH (v:Vehicle)-[r:AT_RISK]->(b:BOMItem)
+                    -[:FULFILLED_BY]->(l:ProductionLine)
+                RETURN v.model_id AS model,
+                    v.name AS name,
+                    v.daily_target AS daily_target,
+                    b.part_type AS blocked_part,
+                    l.line_id AS line_id,
+                    r.severity AS severity,
+                    r.wip_cost_eur AS wip_cost
+                ORDER BY r.severity DESC
+            """)
+            records = list(results)
+
+            if not records:
+                bom = self.conn.session().run("""
+                    MATCH (v:Vehicle)-[r:REQUIRES]->(b:BOMItem)
+                        -[:FULFILLED_BY]->(l:ProductionLine)
+                    RETURN v.model_id AS model,
+                        v.daily_target AS target,
+                        b.part_type AS part,
+                        r.total_daily_qty AS total_qty,
+                        l.line_id AS line
+                    ORDER BY v.model_id, b.part_type
+                """)
+                bom_records = list(bom)
+
+                if not bom_records:
+                    return "[EQA] No BOM data found. Run python -m data.bom_generator first."
+
+                response = "\n[EQA] Vehicle BOM Summary (no active risks):\n"
+                response += "-" * 55 + "\n"
+                current_model = None
+                for r in bom_records:
+                    if r["model"] != current_model:
+                        current_model = r["model"]
+                        response += f"\n  {r['model']} ({r['target']} vehicles/day)\n"
+                    response += (f"    {r['part']:<16}: "
+                                f"{r['total_qty']} units/day → {r['line']}\n")
+                return response
+
+            response = "\n[EQA] Vehicle Completion Risk:\n"
+            response += "-" * 55 + "\n"
+            total_blocked = 0
+            total_wip = 0
+            for r in records:
+                response += (
+                    f"  {r['model']} — {r['name']}\n"
+                    f"    Blocked part : {r['blocked_part']}\n"
+                    f"    Line         : {r['line_id']}\n"
+                    f"    Severity     : {r['severity']}\n"
+                    f"    Daily blocked: {r['daily_target']} vehicles\n"
+                    f"    WIP cost     : €{r['wip_cost']:,}\n\n"
+                )
+                total_blocked += r["daily_target"]
+                total_wip += r["wip_cost"] or 0
+
+            response += f"  Total vehicles at risk : {total_blocked}\n"
+            response += f"  Total WIP cost         : €{total_wip:,}\n"
+            return response
 
 
 if __name__ == "__main__":
