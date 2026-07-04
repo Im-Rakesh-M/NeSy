@@ -28,8 +28,10 @@ class BOMAgent(BaseAgent):
 
     def __init__(self, message_bus):
         super().__init__("BOMAgent", message_bus)
-        for topic in ["CASCADE_ALERT", "BUFFER_ALERT", "MACHINE_RISK"]:
-            self.bus.subscribe(topic, self.perceive)
+        # Subscribe only to CASCADE_ALERT — this fires when
+        # severity is confirmed critical, not on every event.
+        # Avoids BOMAgent firing multiple times per machine event.
+        self.bus.subscribe("CASCADE_ALERT", self.perceive)
 
     async def perceive(self, payload: Dict[str, Any]):
         """Receives supply chain event and assesses BOM impact."""

@@ -22,7 +22,7 @@ class LogisticsAgent(BaseAgent):
     4. Log every decision as AuditEntry in Neo4j
     """
 
-    DELAY_THRESHOLD_MINS = 10  # JIT threshold from dissertation spec
+    DELAY_THRESHOLD_MINS = 10  # Fallback only — read from graph at runtime
 
     def __init__(self, message_bus):
         super().__init__("LogisticsAgent", message_bus)
@@ -38,7 +38,7 @@ class LogisticsAgent(BaseAgent):
 
         Decision tree:
         1. Is delay predicted with HIGH confidence?
-        2. Is delay > 10 min JIT threshold?
+        2. Is delay > JIT threshold (read from graph)?
         3. Is buffer below safety stock on target line?
            YES → find alternate supplier from graph
            NO  → monitor only
@@ -73,15 +73,26 @@ class LogisticsAgent(BaseAgent):
             return {"action": "MONITOR_ONLY", "order_id": order_id}
 
         # Gate 2 — is delay beyond JIT threshold?
-        if delay_mins <= self.DELAY_THRESHOLD_MINS:
+        jit_threshold = self.query_graph("""
+            MATCH (l:ProductionLine {line_id: $line_id})
+            RETURN l.jit_threshold_mins AS jit_threshold
+        """, {"line_id": line_id})
+
+        if not jit_threshold:
+            print(f"[{self.agent_name}] Line {line_id} not found in graph.")
+            return {"action": "ERROR", "order_id": order_id}
+
+        jit_threshold_mins = jit_threshold[0]["jit_threshold"]
+
+        if delay_mins <= jit_threshold_mins:
             self.log_audit(
                 event_type="DELIVERY_RISK",
                 decision="BUFFER_CAN_ABSORB",
                 confidence=prob_late,
-                rule_fired="JIT_10MIN_THRESHOLD",
+                rule_fired="JIT_THRESHOLD_CHECK",
                 status="COMPLIANT",
                 cost=0.0,
-                alternative="Delay within buffer window"
+                alternative=f"Delay {delay_mins:.0f}mins within JIT threshold {jit_threshold_mins:.0f}mins"
             )
             return {"action": "BUFFER_CAN_ABSORB", "order_id": order_id}
 

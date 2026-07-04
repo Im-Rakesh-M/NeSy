@@ -20,8 +20,8 @@ class InventoryAgent(BaseAgent):
        safety stock threshold
     """
 
-    BUFFER_WARNING_PCT = 30   # Warning threshold
-    BUFFER_CRITICAL_PCT = 15  # Critical threshold
+    BUFFER_WARNING_PCT = 30   # Fallback only — read from graph at runtime
+    BUFFER_CRITICAL_PCT = 15  # Fallback only — read from graph at runtime
 
     def __init__(self, message_bus):
         super().__init__("InventoryAgent", message_bus)
@@ -62,18 +62,28 @@ class InventoryAgent(BaseAgent):
                    l.safety_stock_units AS safety_stock,
                    l.buffer_pct AS buffer_pct,
                    l.part_type AS part_type,
-                   l.cycle_time_mins AS cycle_time
+                   l.cycle_time_mins AS cycle_time,
+                   l.buffer_warning_pct AS buffer_warning_pct,
+                   l.buffer_critical_pct AS buffer_critical_pct
         """, {"line_id": line_id})
 
         if not buffer_state:
             print(f"[{self.agent_name}] Line {line_id} not in graph.")
             return {"action": "ERROR", "line_id": line_id}
 
-        buf = buffer_state[0]
-        buffer_pct = buf["buffer_pct"]
-        buffer_units = buf["buffer_units"]
-        safety_stock = buf["safety_stock"]
-        line_part_type = buf["part_type"]
+        buffer_pct = buffer_state[0]["buffer_pct"]
+        buffer_units = buffer_state[0]["buffer_units"]
+        safety_stock = buffer_state[0]["safety_stock"]
+        line_part_type = buffer_state[0]["part_type"]
+
+        # Read thresholds from graph — not hardcoded
+        # Each production line can have different thresholds
+        warning_pct = buffer_state[0].get("buffer_warning_pct") or self.BUFFER_WARNING_PCT
+        critical_pct = buffer_state[0].get("buffer_critical_pct") or self.BUFFER_CRITICAL_PCT
+
+        # TEMP DEBUG — remove after verification
+        print(f"[{self.agent_name}] {line_id} thresholds — "
+                    f"Warning: {warning_pct}% | Critical: {critical_pct}%")
 
         # Handle reroute action from Logistics Agent
         if action == "REROUTE_TO_BACKUP" and backup_supplier_id:
@@ -138,7 +148,7 @@ class InventoryAgent(BaseAgent):
             }
 
         # Monitor buffer thresholds
-        if buffer_pct <= self.BUFFER_CRITICAL_PCT:
+        if buffer_pct <= critical_pct:
             self.log_audit(
                 event_type="BUFFER_ALERT",
                 decision="CRITICAL_BUFFER_ALERT",
@@ -162,7 +172,7 @@ class InventoryAgent(BaseAgent):
                 "line_id": line_id
             }
 
-        if buffer_pct <= self.BUFFER_WARNING_PCT:
+        if buffer_pct <= warning_pct:
             self.log_audit(
                 event_type="BUFFER_ALERT",
                 decision="BUFFER_WARNING_ISSUED",
@@ -212,6 +222,8 @@ class InventoryAgent(BaseAgent):
 
         print(f"[{self.agent_name}] Buffer updated for "
               f"Line {line_id} +{units_delivered} units")
+        
+
 
         self.log_audit(
             event_type="RESTOCK_COMPLETE",

@@ -153,6 +153,12 @@ class NESODigitalTwin:
         print(f"  -> Processing {machine_limit} machine events")
         print("-" * 60)
 
+        # Clear audit entries from previous runs
+        # Keeps cost reporting accurate per session
+        with self.conn.session() as session:
+            session.run("MATCH (a:AuditEntry) DELETE a")
+        print("[NESO-DT] Audit trail cleared for fresh run.")
+
         # Fetch high-risk delivery orders from graph
         delivery_results = []
         for line in ['LINE_A', 'LINE_B', 'LINE_C', 'LINE_D']:
