@@ -327,6 +327,9 @@ async def main():
         machine_limit=20
     )
 
+    # Allow pending async tasks to complete before closing
+    await asyncio.sleep(0.5)
+    Neo4jConnection.get_instance().close()
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -7,8 +7,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 class MessageBus:
     def __init__(self):
-        # Maps topics to lists of async callback handlers
         self._subscribers: Dict[str, List[Callable[[Dict[str, Any]], asyncio.Future]]] = {}
+        self._event_log: List[Dict] = []
 
     def subscribe(self, topic: str, callback: Callable[[Dict[str, Any]], Any]):
         if topic not in self._subscribers:
@@ -28,11 +28,14 @@ class MessageBus:
                 tasks.append(asyncio.create_task(callback(payload)))
             else:
                 # Fallback run within loop contextExecutor
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 tasks.append(loop.run_in_executor(None, callback, payload))
                 
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            except Exception:
+                pass
 
     def get_topic_stats(self) -> dict:
         """
