@@ -168,6 +168,70 @@ function EQAPanel() {
   );
 }
 
+function LLMEQAPanel() {
+  const [question, setQuestion] = React.useState('');
+  const [answer, setAnswer] = React.useState(
+    'Ask me anything about the Digital Twin in plain English...'
+  );
+  const [loading, setLoading] = React.useState(false);
+  const [cypher, setCypher] = React.useState('');
+
+  const ask = async () => {
+    if (!question.trim()) return;
+    setLoading(true);
+    setCypher('');
+    try {
+      const res = await fetch(API + '/api/llm-eqa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question })
+      });
+      const data = await res.json();
+      setAnswer(data.answer);
+    } catch (e) {
+      setAnswer('Error connecting to LLM EQA engine.');
+    }
+    setLoading(false);
+  };
+
+  const examples = [
+    'which supplier has been rerouted most?',
+    'what is the WIP cost if LINE_B fails?',
+    'how many workers are overtime eligible?',
+    'which machines have consecutive low risk?',
+    'what regulatory rules apply to machine maintenance?'
+  ];
+
+  return (
+    <div className="eqa-box">
+      <div style={{fontSize: 12, color: '#00d4ff', marginBottom: 8}}>
+        🤖 AI-Powered — ask any question, Claude generates the Cypher query
+      </div>
+      <div className="eqa-input">
+        <input
+          value={question}
+          onChange={e => setQuestion(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && ask()}
+          placeholder="Ask anything about your Digital Twin..."
+        />
+        <button onClick={ask} disabled={loading}>
+          {loading ? 'Thinking...' : 'Ask AI'}
+        </button>
+      </div>
+      <div style={{display:'flex', gap:6, flexWrap:'wrap', marginBottom:12}}>
+        {examples.map(ex => (
+          <span key={ex} onClick={() => setQuestion(ex)}
+            style={{fontSize:11, color:'#00d4ff', cursor:'pointer',
+                    padding:'2px 6px', background:'#12141f', borderRadius:4}}>
+            {ex}
+          </span>
+        ))}
+      </div>
+      <div className="eqa-answer">{answer}</div>
+    </div>
+  );
+}
+
 function App() {
   const summary = useFetch('/api/summary', 15000);
   const lines = useFetch('/api/lines', 15000);
@@ -177,6 +241,8 @@ function App() {
   const compliance = useFetch('/api/compliance', 15000);
   const sopRules = useFetch('/api/sop-rules', 60000);
   const [tab, setTab] = React.useState('overview');
+
+  const [eqaMode, setEqaMode] = React.useState('fixed')
 
   return (
     <div>
@@ -376,15 +442,21 @@ function App() {
         )}
 
         {tab === 'eqa' && (
-          <>
-            <h2>Embodied Question Answering — Ask the Digital Twin</h2>
-            <EQAPanel />
-          </>
-        )}
+  <>
+    <h2>Embodied Question Answering — Ask the Digital Twin</h2>
+    <div className="tabs" style={{marginBottom: 12}}>
+      <div className={`tab ${eqaMode==='fixed'?'active':''}`}
+           onClick={()=>setEqaMode('fixed')}>FIXED QUERIES</div>
+      <div className={`tab ${eqaMode==='llm'?'active':''}`}
+           onClick={()=>setEqaMode('llm')}>AI-POWERED (Any Question)</div>
+    </div>
+    {eqaMode === 'fixed' ? <EQAPanel /> : <LLMEQAPanel />}
+  </>
+)}
       </div>
     </div>
   );
-}
+} 
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>

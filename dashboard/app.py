@@ -213,3 +213,13 @@ def dashboard():
         "dashboard/index.html",
         encoding="utf-8"
     ).read())
+
+from eqa.llm_engine import LLMEQAEngine
+
+llm_eqa = LLMEQAEngine()
+
+@app.post("/api/llm-eqa")
+def ask_llm_eqa(query: EQAQuery):
+    """LLM-powered EQA — answers any natural language question."""
+    answer = llm_eqa.answer(query.question)
+    return {"question": query.question, "answer": answer}
